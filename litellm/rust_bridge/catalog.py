@@ -4,6 +4,7 @@
 state, returning ``Rust(required=True)`` where no Python implementation exists, ``optional()``
 where the global switch decides, or ``Python(reason)`` naming the gap that keeps a call on
 Python. ``decide`` only looks the route up; a route without a policy is not ported.
+Failures from a selected native call are terminal; nothing replays on Python.
 """
 
 from __future__ import annotations

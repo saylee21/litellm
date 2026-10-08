@@ -15,17 +15,13 @@ from litellm.rust_bridge.lifecycle import Complete, Open, Yield
 from litellm.rust_bridge.streams import Stream, SyncStream
 
 
-class RustBridgeDeclined(Exception):
-    pass
-
-
 class RustUpstreamError(Exception):
     pass
 
 
 @pytest.fixture(autouse=True)
 def native_exceptions(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
-    native: Final = SimpleNamespace(RustBridgeDeclined=RustBridgeDeclined, RustUpstreamError=RustUpstreamError)
+    native: Final = SimpleNamespace(RustUpstreamError=RustUpstreamError)
     monkeypatch.setattr(bindings, "get_native_bridge", lambda: native)
     monkeypatch.delenv("LITELLM_RUST", raising=False)
     configuration.reset_rust_configuration()
@@ -159,14 +155,6 @@ async def test_python_decision_never_loads_the_native_binding(asynchronous: bool
 
 
 @ASYNC
-async def test_optional_native_decline_falls_back_to_python_once(asynchronous: bool) -> None:
-    calls: Final = Recorder(RustBridgeDeclined("unsupported"))
-
-    assert await run(OPTIONAL, calls, asynchronous=asynchronous) == PYTHON
-    assert calls.calls == (RUST, PYTHON)
-
-
-@ASYNC
 async def test_optional_unavailable_native_falls_back_to_python(asynchronous: bool) -> None:
     calls: Final = Recorder()
 
@@ -175,10 +163,9 @@ async def test_optional_unavailable_native_falls_back_to_python(asynchronous: bo
 
 
 @ASYNC
-@pytest.mark.parametrize("native_missing", (False, True), ids=("declined", "unavailable"))
-async def test_python_fallback_result_is_not_marked_as_rust(asynchronous: bool, native_missing: bool) -> None:
+async def test_python_fallback_result_is_not_marked_as_rust(asynchronous: bool) -> None:
     expected: Final = OCRResponse(pages=[], model="python")
-    bound: Final = binding(None if native_missing else Recorder(RustBridgeDeclined("unsupported")).rust)
+    bound: Final = binding(None)
 
     async def anative(fn: NativeFn) -> object:
         return fn()
@@ -304,16 +291,6 @@ async def test_required_route_rejects_unavailable_bridge(asynchronous: bool) -> 
 
 
 @ASYNC
-async def test_required_route_rejects_native_decline(asynchronous: bool) -> None:
-    calls: Final = Recorder(RustBridgeDeclined("unsupported"))
-
-    with pytest.raises(RuntimeError, match="declined the request: unsupported"):
-        await run(REQUIRED, calls, asynchronous=asynchronous)
-
-    assert calls.calls == (RUST,)
-
-
-@ASYNC
 async def test_route_without_python_runs_native(asynchronous: bool) -> None:
     calls: Final = Recorder()
 
@@ -326,9 +303,9 @@ async def test_route_without_python_runs_native(asynchronous: bool) -> None:
     ("native_missing", "effect", "message"),
     (
         (True, None, "Rust messages bridge is unavailable"),
-        (False, RustBridgeDeclined("unsupported"), "Rust messages bridge declined the request: unsupported"),
+        (False, RuntimeError("unsupported"), "^unsupported$"),
     ),
-    ids=("unavailable", "declined"),
+    ids=("unavailable", "native-failure"),
 )
 async def test_route_without_python_raises_when_native_cannot_serve_the_call(
     asynchronous: bool, native_missing: bool, effect: BaseException | None, message: str
