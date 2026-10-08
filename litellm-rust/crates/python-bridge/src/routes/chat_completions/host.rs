@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 
-use super::super::inference::{InferenceHost, ProjectedCall};
+use super::super::codec::{ProjectedCall, RouteCodec};
 use litellm_host_python::{InvokeError, PythonBinding, PythonHostCalls, PythonOwned};
 use litellm_inference_chat::{Error, route::ChatCompletions, types::ChatCompletionsCall};
 use pyo3::{
@@ -9,7 +9,7 @@ use pyo3::{
     types::PyDict,
 };
 
-pub(super) struct ChatCompletionsPythonHost(pub InferenceHost);
+pub(super) struct ChatCompletionsPythonHost(pub RouteCodec);
 
 impl From<ProjectedCall> for ChatCompletionsCall {
     fn from(call: ProjectedCall) -> Self {

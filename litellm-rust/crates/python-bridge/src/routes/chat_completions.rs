@@ -15,8 +15,8 @@ fn run_public(
 ) -> PyResult<Py<PyAny>> {
     use litellm_callbacks_legacy_python::LoggingOperation;
 
-    use super::inference::InferenceHost;
-    let host = InferenceHost::new(
+    use super::codec::RouteCodec;
+    let host = RouteCodec::new(
         request.clone(),
         "litellm.rust_bridge.chat_completions.route_host",
     );

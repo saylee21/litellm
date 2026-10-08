@@ -19,9 +19,9 @@ fn run_public(
     kwargs: Bound<'_, PyDict>,
     asynchronous: bool,
 ) -> PyResult<Py<PyAny>> {
-    use super::inference::InferenceHost;
+    use super::codec::RouteCodec;
     use litellm_callbacks_legacy_python::LoggingOperation;
-    let host = InferenceHost::new(request.clone(), "litellm.rust_bridge.responses.route_host");
+    let host = RouteCodec::new(request.clone(), "litellm.rust_bridge.responses.route_host");
     if let Some(reason) = py
         .import("litellm.rust_bridge.responses.route_host")?
         .getattr("decline_reason")?
