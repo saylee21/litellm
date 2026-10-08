@@ -2,7 +2,7 @@ use litellm_auth::SecretValue;
 use litellm_host_python::from_py;
 use litellm_inference_ocr::{
     types::{LiteLLMOcrRequest, OcrDocumentInput},
-    wire::{OcrWireRequest, consumed_optional_params, decode_document, decode_request_input},
+    wire::{OcrWireRequest, decode_document, decode_request_input, owned_option_names},
 };
 use litellm_llms::base_llm::ocr::error::Error;
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyDict};
@@ -11,10 +11,10 @@ use serde_json::Value;
 use super::{document::FileDocumentInput, errors::to_pyerr as ocr_error_to_pyerr};
 use crate::{
     credentials::{self, CallerTokenProvider},
-    marshal::{project_optional_fields, request_input_sources},
+    marshal::request_input_sources,
     routes::{
         codec::connection_options,
-        parameters::{field, merged_request},
+        parameters::{field, merged_request, provider_parameters},
     },
 };
 
@@ -75,16 +75,14 @@ pub(super) fn project_request(
         &field(&request, "document")?
             .ok_or_else(|| PyValueError::new_err("document is required"))?,
     )?;
-    let specs = consumed_optional_params(&options.model, options.custom_llm_provider.as_deref())
+    let owned = owned_option_names(&options.model, options.custom_llm_provider.as_deref())
         .map_err(ocr_error_to_pyerr)?;
-    let names = specs.iter().map(|spec| spec.name).collect::<Vec<_>>();
-    let optional_params =
-        project_optional_fields(names.iter().copied(), |name| field(&request, name))?;
+    let optional_params = provider_parameters(&request, "document", &owned)?;
     let input_sources = request_input_sources(
         &request,
-        names
-            .iter()
-            .copied()
+        optional_params
+            .keys()
+            .map(String::as_str)
             .chain(["api_key", "api_base", "extra_headers"]),
     )?;
     let azure_ad_token_provider = credentials::azure_ad_token_provider(&request)?;
@@ -95,7 +93,7 @@ pub(super) fn project_request(
         api_base: options.api_base,
         custom_llm_provider: options.custom_llm_provider,
         extra_headers: options.extra_headers,
-        optional_params,
+        optional_params: optional_params.into(),
         input_sources,
         timeout_seconds: options.timeout.map(|timeout| timeout.as_secs_f64()),
     };
@@ -477,7 +475,7 @@ request = {
     }
 
     #[test]
-    fn unconsumed_kwargs_stay_out_of_optional_params_and_response_limit_goes_to_transport() {
+    fn owned_kwargs_stay_out_and_unknown_fields_reach_the_provider() {
         Python::initialize();
         Python::attach(|py| {
             stub_python_modules(py);
@@ -493,16 +491,27 @@ kwargs = {
     'ocr_cost_per_page': 0.05,
     'shared_session': object(),
     'guardrails': ['guard'],
-    'opaque': object(),
+    'future_ocr_option': {'mode': 'new'},
+    'extra_body': {'another_option': 1},
 }
 ",
             );
             let (projected, _) = project_request(&request, &kwargs).unwrap();
             assert_eq!(
                 projected.optional_params.keys().collect::<Vec<_>>(),
-                ["pages"]
+                ["pages", "future_ocr_option", "another_option"]
             );
             assert_eq!(projected.transport.max_response_bytes, 1234);
+        });
+    }
+
+    #[test]
+    fn an_unknown_field_that_is_not_json_is_rejected() {
+        Python::initialize();
+        Python::attach(|py| {
+            stub_python_modules(py);
+            let (request, kwargs) = request_and_kwargs(py, c"kwargs = {'opaque': object()}");
+            assert!(project_request(&request, &kwargs).is_err());
         });
     }
 

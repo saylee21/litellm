@@ -8,34 +8,7 @@ use serde_json::{Map, Value};
 
 use crate::types::{LiteLLMOcrRequest, OcrConnectionInputs, OcrDocumentInput};
 
-pub fn consumed_optional_params(
-    model: &str,
-    provider: Option<&str>,
-) -> Result<Vec<litellm_core_utils::call_arguments::ArgumentSpec>, Error> {
-    let specs = crate::arguments::consumed_optional_params(model, provider)?;
-    Ok(consumed_optional_param_names(model, provider)?
-        .into_iter()
-        .map(|name| litellm_core_utils::call_arguments::ArgumentSpec {
-            name,
-            secret: specs.iter().any(|spec| spec.name == name && spec.secret),
-        })
-        .collect())
-}
-
-pub fn consumed_optional_param_names(
-    model: &str,
-    provider: Option<&str>,
-) -> Result<Vec<&'static str>, Error> {
-    let names = crate::arguments::consumed_optional_param_names(model, provider)?;
-    let (_, config) = super::provider_config::resolve_provider_config(model, provider)?;
-    if config == super::provider_config::OcrConfigKind::VertexDeepSeek {
-        return Ok(names
-            .into_iter()
-            .chain(["stream", "temperature", "max_tokens", "top_p", "n", "stop"])
-            .collect());
-    }
-    Ok(names)
-}
+pub use crate::arguments::owned_option_names;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -136,45 +109,6 @@ mod tests {
         ));
         assert_eq!(error.http_status_code(), Some(400));
         assert!(error.to_string().contains(field), "{error}");
-    }
-
-    #[test]
-    fn option_projection_is_provider_specific_and_excludes_opaque_fields() {
-        let mistral = consumed_optional_param_names("mistral/model", None).unwrap();
-        assert!(mistral.contains(&"pages"));
-        assert!(mistral.contains(&"req_format"));
-        assert!(!mistral.contains(&"vertex_project"));
-        assert!(!mistral.contains(&"opaque_extension"));
-        let vertex = consumed_optional_param_names("vertex_ai/deepseek-ocr", None).unwrap();
-        assert!(vertex.contains(&"temperature"));
-        assert!(vertex.contains(&"vertex_credentials"));
-        assert!(!vertex.contains(&"pages"));
-    }
-
-    #[test]
-    fn optional_param_metadata_marks_only_credentials_as_secret() {
-        let azure = consumed_optional_params("model", Some("azure_ai")).unwrap();
-        assert!(
-            azure
-                .iter()
-                .any(|spec| spec.name == "client_secret" && spec.secret)
-        );
-        assert!(
-            azure
-                .iter()
-                .any(|spec| spec.name == "tenant_id" && !spec.secret)
-        );
-        let vertex = consumed_optional_params("deepseek-ocr", Some("vertex_ai")).unwrap();
-        assert!(
-            vertex
-                .iter()
-                .any(|spec| spec.name == "vertex_credentials" && spec.secret)
-        );
-        assert!(
-            vertex
-                .iter()
-                .any(|spec| spec.name == "vertex_project" && !spec.secret)
-        );
     }
 
     #[test]
