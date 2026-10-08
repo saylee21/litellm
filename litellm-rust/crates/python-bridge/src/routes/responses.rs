@@ -21,11 +21,7 @@ fn run_public(
 ) -> PyResult<Py<PyAny>> {
     use super::inference::InferenceHost;
     use litellm_callbacks_legacy_python::LoggingOperation;
-    let host = InferenceHost::new(
-        request.clone(),
-        "litellm.rust_bridge.responses.route_host",
-        &kwargs,
-    )?;
+    let host = InferenceHost::new(request.clone(), "litellm.rust_bridge.responses.route_host");
     if let Some(reason) = py
         .import("litellm.rust_bridge.responses.route_host")?
         .getattr("decline_reason")?
@@ -34,12 +30,10 @@ fn run_public(
     {
         return Err(RustBridgeDeclined::new_err(reason));
     }
-    let model = host
-        .argument(py, &kwargs, "model")?
+    let model = super::parameters::field(&request, "model")?
         .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("model is required"))?
         .extract::<String>()?;
-    let provider = host
-        .argument(py, &kwargs, "custom_llm_provider")?
+    let provider = super::parameters::field(&request, "custom_llm_provider")?
         .map(|value| value.extract::<String>())
         .transpose()?;
     if provider
@@ -54,8 +48,7 @@ fn run_public(
             "native HTTP responses provider",
         ));
     }
-    if host
-        .argument(py, &kwargs, "stream")?
+    if super::parameters::field(&request, "stream")?
         .map(|value| litellm_host_python::from_py::<Value>(&value))
         .transpose()?
         .is_some_and(|value| value == Value::Bool(true))
