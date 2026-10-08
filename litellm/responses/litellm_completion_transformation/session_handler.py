@@ -53,6 +53,7 @@ class ResponsesSessionHandler:
         """
         from litellm.responses.litellm_completion_transformation.transformation import (
             ChatCompletionSession,
+            LiteLLMCompletionResponsesConfig,
         )
 
         verbose_proxy_logger.debug("inside get_chat_completion_message_history_for_previous_response_id")
@@ -72,21 +73,33 @@ class ResponsesSessionHandler:
             | ChatCompletionResponseMessage
             | Message
         ] = []
+        carried_instructions: str | None = None  # rebind-ok: first instructed spend log wins
         for spend_log in all_spend_logs:
-            chat_completion_message_history = (
-                await ResponsesSessionHandler.extend_chat_completion_message_with_spend_log_payload(
-                    spend_log=spend_log,
-                    chat_completion_message_history=chat_completion_message_history,
-                    carry_over_instructions=carry_over_instructions,
-                )
+            (
+                chat_completion_message_history,
+                log_instructions,
+            ) = await ResponsesSessionHandler.extend_chat_completion_message_with_spend_log_payload(
+                spend_log=spend_log,
+                chat_completion_message_history=chat_completion_message_history,
             )
+            if carried_instructions is None and log_instructions:
+                carried_instructions = log_instructions
+
+        messages_with_carried_instructions: Final = (
+            [
+                LiteLLMCompletionResponsesConfig.transform_instructions_to_system_message(carried_instructions),
+                *chat_completion_message_history,
+            ]
+            if carry_over_instructions and carried_instructions
+            else chat_completion_message_history
+        )
 
         verbose_proxy_logger.debug(
             "chat_completion_message_history %s",
-            json.dumps(chat_completion_message_history, indent=4, default=str),
+            json.dumps(messages_with_carried_instructions, indent=4, default=str),
         )
         return ChatCompletionSession(
-            messages=chat_completion_message_history,
+            messages=messages_with_carried_instructions,
             litellm_session_id=litellm_session_id,
         )
 
@@ -100,7 +113,6 @@ class ResponsesSessionHandler:
             | ChatCompletionResponseMessage
             | Message
         ],
-        carry_over_instructions: bool,
     ):
         """
         Extend the chat completion message history with the spend log payload
@@ -113,6 +125,10 @@ class ResponsesSessionHandler:
             spend_log=spend_log,
         )
         response_input_param: str | ResponseInputParam | None = None
+        raw_instructions: Final = (
+            None if proxy_server_request_dict is None else proxy_server_request_dict.get("instructions")
+        )
+        log_instructions: Final = raw_instructions if isinstance(raw_instructions, str) and raw_instructions else None
 
         ############################################################
         # Add Input messages for this Spend Log
@@ -133,7 +149,7 @@ class ResponsesSessionHandler:
             chat_completion_message_history.extend(
                 LiteLLMCompletionResponsesConfig.transform_responses_api_input_to_messages(
                     input=response_input_param,
-                    responses_api_request=(proxy_server_request_dict or {}) if carry_over_instructions else {},
+                    responses_api_request={},
                     replay_reasoning=True,
                 )
             )
@@ -149,7 +165,7 @@ class ResponsesSessionHandler:
                 if hasattr(choice, "message"):
                     _normalize_redacted_tool_call_arguments(choice.message)
                     chat_completion_message_history.append(choice.message)
-        return chat_completion_message_history
+        return chat_completion_message_history, log_instructions
 
     @staticmethod
     async def get_proxy_server_request_from_spend_log(

@@ -787,3 +787,101 @@ async def test_message_history_replays_real_key_named_tool_payloads() -> None:
     tool_message: Final = result["messages"][2]
     assert json.loads(assistant_message["tool_calls"][0]["function"]["arguments"]) == function_arguments
     assert json.loads(tool_message["content"]) == function_output
+
+
+def _message_role(message: object) -> str | None:
+    if isinstance(message, dict):
+        role: Final = message.get("role")
+        return role if isinstance(role, str) else None
+    role = getattr(message, "role", None)
+    return role if isinstance(role, str) else None
+
+
+def _message_content(message: object) -> object:
+    if isinstance(message, dict):
+        return message.get("content")
+    return getattr(message, "content", None)
+
+
+def _has_tool_calls(message: object) -> bool:
+    if isinstance(message, dict):
+        return bool(message.get("tool_calls"))
+    return bool(getattr(message, "tool_calls", None))
+
+
+@pytest.mark.asyncio
+async def test_carried_instructions_are_a_single_leading_system_message_across_a_tool_roundtrip() -> None:
+    first_turn: Final = {
+        "request_id": "chatcmpl-first-turn",
+        "call_type": "aresponses",
+        "session_id": "session-1",
+        "proxy_server_request": {
+            "input": "What is the weather in Tokyo?",
+            "instructions": "Be terse.",
+        },
+        "response": {
+            "id": "chatcmpl-first-turn",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "claude-haiku-4-5",
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "toolu_weather",
+                                "type": "function",
+                                "function": {"name": "get_weather", "arguments": '{"city": "Tokyo"}'},
+                            }
+                        ],
+                    },
+                }
+            ],
+        },
+    }
+    second_turn: Final = {
+        "request_id": "chatcmpl-second-turn",
+        "call_type": "aresponses",
+        "session_id": "session-1",
+        "proxy_server_request": {
+            "input": [{"type": "function_call_output", "call_id": "toolu_weather", "output": "47C"}],
+            "instructions": "Be terse.",
+        },
+        "response": {
+            "id": "chatcmpl-second-turn",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "claude-haiku-4-5",
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": "47C in Tokyo."},
+                }
+            ],
+        },
+    }
+
+    with patch.object(  # test-quality-ok: the handler has no DI seam for the spend-log fetch; every test in this file stubs this same boundary
+        ResponsesSessionHandler,
+        "get_all_spend_logs_for_previous_response_id",
+        new_callable=AsyncMock,
+    ) as mock_get_spend_logs:
+        mock_get_spend_logs.return_value = [first_turn, second_turn]
+        result: Final = await ResponsesSessionHandler.get_chat_completion_message_history_for_previous_response_id(
+            "chatcmpl-second-turn",
+            carry_over_instructions=True,
+        )
+
+    messages: Final = result["messages"]
+    roles: Final = [_message_role(message) for message in messages]
+    assert roles[0] == "system"
+    assert _message_content(messages[0]) == "Be terse."
+    assert roles.count("system") == 1
+    tool_use_index: Final = next(index for index, message in enumerate(messages) if _has_tool_calls(message))
+    assert roles[tool_use_index] == "assistant"
+    assert roles[tool_use_index + 1] == "tool"

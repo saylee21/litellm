@@ -247,3 +247,62 @@ async def test_previous_response_id_tool_output_without_instructions_keeps_the_p
 
     assert _message_shapes(request) == _EXPECTED_MESSAGES
     assert [block.text for block in request.system] == [_FIRST_TURN_INSTRUCTIONS]
+
+
+_SECOND_TURN: Final = {
+    "request_id": "chatcmpl-second-turn",
+    "call_type": "aresponses",
+    "session_id": "session-1",
+    "proxy_server_request": {
+        "model": _MODEL,
+        "input": [{"type": "function_call_output", "call_id": "toolu_weather", "output": "47C"}],
+        "instructions": _FIRST_TURN_INSTRUCTIONS,
+    },
+    "response": {
+        "id": "chatcmpl-second-turn",
+        "object": "chat.completion",
+        "created": 0,
+        "model": _MODEL,
+        "choices": [
+            {
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {"role": "assistant", "content": "47C in Tokyo."},
+            }
+        ],
+    },
+}
+
+
+@pytest.mark.asyncio
+async def test_omitted_instructions_after_a_tool_roundtrip_keep_tool_use_next_to_tool_result() -> None:
+    """
+    Replaying two instructed turns (question -> tool_use, then tool_result -> answer) and omitting
+    instructions on the follow-up must not insert a system message between tool_use and tool_result
+    """
+    anthropic: Final = _RecordingAnthropicMessages()
+    with patch("litellm.proxy.proxy_server.prisma_client", _FakePrismaClient([_FIRST_TURN, _SECOND_TURN])):
+        await litellm.aresponses(
+            model="anthropic/claude-haiku-4-5",
+            previous_response_id="chatcmpl-second-turn",
+            input="Thanks. What about Osaka?",
+            tools=[
+                {
+                    "type": "function",
+                    "name": "get_weather",
+                    "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
+                }
+            ],
+            api_key="sk-ant-fake",
+            client=AsyncHTTPHandler(transport=httpx.MockTransport(anthropic)),
+        )
+
+    assert anthropic.request is not None
+    assert _message_shapes(anthropic.request) == [
+        ("user", [("text", "What is the weather in Tokyo?")]),
+        ("assistant", [("tool_use", "toolu_weather")]),
+        ("user", [("tool_result", "toolu_weather")]),
+        ("assistant", [("text", "47C in Tokyo.")]),
+        ("user", [("text", "Thanks. What about Osaka?")]),
+    ]
+    assert [block.text for block in anthropic.request.system] == [_FIRST_TURN_INSTRUCTIONS]
