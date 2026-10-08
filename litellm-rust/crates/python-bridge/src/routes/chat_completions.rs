@@ -8,7 +8,7 @@ use pyo3::{
 
 fn run_public(
     py: Python<'_>,
-    request: Bound<'_, PyAny>,
+    request: Bound<'_, PyDict>,
     args: Bound<'_, PyTuple>,
     kwargs: Bound<'_, PyDict>,
     asynchronous: bool,
@@ -17,9 +17,10 @@ fn run_public(
 
     use super::inference::InferenceHost;
     let host = InferenceHost::new(
-        request.clone().unbind(),
+        request.clone(),
         "litellm.rust_bridge.chat_completions.route_host",
-    );
+        &kwargs,
+    )?;
     let cache_call_type = if asynchronous {
         "acompletion"
     } else {
@@ -29,7 +30,7 @@ fn run_public(
     let (arguments, hooks) = crate::routes::call_hooks(
         py,
         LoggingOperation::Completion,
-        &request,
+        request.as_any(),
         &args,
         &kwargs,
         asynchronous,
@@ -64,11 +65,11 @@ fn run_public(
 #[pyfunction]
 pub(crate) fn completion(py: Python<'_>, call: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let call = super::NativeCall::extract(&call)?;
-    run_public(py, call.bound.into_any(), call.args, call.kwargs, false)
+    run_public(py, call.bound, call.args, call.kwargs, false)
 }
 
 #[pyfunction]
 pub(crate) fn acompletion(py: Python<'_>, call: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let call = super::NativeCall::extract(&call)?;
-    run_public(py, call.bound.into_any(), call.args, call.kwargs, true)
+    run_public(py, call.bound, call.args, call.kwargs, true)
 }
