@@ -175,10 +175,6 @@ impl BaseConfig for AmazonConverseConfig {
             .collect()
     }
 
-    fn supported_openai_param_mappings(&self) -> &'static [(&'static str, &'static str)] {
-        SUPPORTED_PARAMS
-    }
-
     fn get_complete_url(
         &self,
         api_base: Option<&str>,
@@ -333,10 +329,6 @@ impl BaseConfig for AmazonConverseConfig {
 
     fn default_headers(&self) -> &'static [(&'static str, &'static str)] {
         &[("Content-Type", "application/json")]
-    }
-
-    fn config_params(&self) -> &'static [&'static str] {
-        CONFIG_PARAMS
     }
 
     fn validate_request(

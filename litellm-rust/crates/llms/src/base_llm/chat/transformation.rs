@@ -32,9 +32,6 @@ pub use crate::base_llm::auth::{Headers, ValidatedEnvironment};
 pub trait BaseConfig: Sync {
     fn secret_names(&self) -> Vec<&'static str>;
 
-    /// Supported OpenAI parameter names paired with their provider names.
-    fn supported_openai_param_mappings(&self) -> &'static [(&'static str, &'static str)];
-
     fn get_complete_url(
         &self,
         api_base: Option<&str>,
@@ -74,12 +71,6 @@ pub trait BaseConfig: Sync {
 
     fn default_headers(&self) -> &'static [(&'static str, &'static str)] {
         &[("content-type", "application/json")]
-    }
-
-    /// Parameters consumed as call configuration (credentials, endpoints)
-    /// rather than placed in the body. Accepted, never serialized.
-    fn config_params(&self) -> &'static [&'static str] {
-        &[]
     }
 
     fn validate_request(
